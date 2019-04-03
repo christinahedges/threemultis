@@ -18,7 +18,7 @@ from astropy.convolution import convolve, Box1DKernel
 import astropy.units as u
 import pandas as pd
 
-from .utils import *
+from .utils import _plot_light_curve
 
 log = logging.getLogger()
 log.setLevel('WARNING')
@@ -59,12 +59,12 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
 
     time = np.asarray(tpf.time, np.float64)
     if trim > 0:
-        flux = np.nan_to_num(np.asarray(tpf.flux[:, trim:-trim, trim:-trim], np.float64))
-        flux_err = np.nan_to_num(np.asarray(tpf.flux_err[:, trim:-trim, trim:-trim], np.float64))
+        flux = np.asarray(tpf.flux[:, trim:-trim, trim:-trim], np.float64)
+        flux_err = np.asarray(tpf.flux_err[:, trim:-trim, trim:-trim], np.float64)
         aper = np.asarray(aperture, bool)[trim:-trim, trim:-trim]
     else:
-        flux = np.nan_to_num(np.asarray(tpf.flux, np.float64))
-        flux_err = np.nan_to_num(np.asarray(tpf.flux_err, np.float64))
+        flux = np.asarray(tpf.flux, np.float64)
+        flux_err = np.asarray(tpf.flux_err, np.float64)
         aper = np.asarray(aperture, bool)
 
     raw_flux = np.asarray(np.nansum(flux[:, aper], axis=(1)),  np.float64)
@@ -105,6 +105,10 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     ## Construct the design matrix and fit for the PLD model
     X_pld = np.concatenate((X_pld, X2_pld), axis=-1)
 
+    if (~np.isfinite(X_pld)).any():
+        raise ValueError('NaNs in components.')
+    if (np.any(raw_flux_err == 0)):
+        raise ValueError('Zeros in raw_flux_err.')
 
     def build_model(mask=None, start=None):
         ''' Build a PYMC3 model
@@ -131,7 +135,9 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
         with pm.Model() as model:
             # GP
             # --------
-            logs2 = pm.Normal("logs2", mu=np.log(1e-4*np.var(raw_flux[mask])), sd=10)
+            logs2 = pm.Normal("logs2", mu=np.log(np.var(raw_flux[mask])), sd=2)
+            pm.Potential("logs2_prior1", tt.switch(logs2 < -2, -np.inf, 0.0))
+
             logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=10)
             logrho = pm.Normal("logrho", mu=np.log(150), sd=10)
             kernel = xo.gp.terms.Matern32Term(log_rho=logrho, log_sigma=logsigma)
@@ -157,6 +163,9 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
             #------------------
             if start is None:
                 start = model.test_point
+            map_soln = xo.optimize(start=start, vars=[logsigma])
+            map_soln = xo.optimize(start=start, vars=[logrho, logsigma])
+            map_soln = xo.optimize(start=start, vars=[logsigma])
             map_soln = xo.optimize(start=start, vars=[logrho, logsigma])
             map_soln = xo.optimize(start=map_soln, vars=[logs2])
             map_soln = xo.optimize(start=map_soln, vars=[logrho, logsigma, logs2])
@@ -246,7 +255,7 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     return clc
 
 
-def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star, texp=0.0204335):
+def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star, texp=0.0204335, ndraws=1000):
     '''Fit planet parameters using exoplanet'''
 
     lc = lc.copy()
@@ -284,8 +293,8 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
             pm.Potential("r_star_prior", tt.switch(r_star > 0, 0, -np.inf))
 
             # Orbital parameters for the planets
-            logP = pm.Normal("logP", mu=np.log(period_value), sd=1, shape=shape)
-            t0 = pm.Normal("t0", mu=t0_value, sd=1, shape=shape)
+            logP = pm.Normal("logP", mu=np.log(period_value), sd=0.01, shape=shape)
+            t0 = pm.Normal("t0", mu=t0_value, sd=0.01, shape=shape)
             b = pm.Uniform("b", lower=0, upper=1, testval=0.5, shape=shape)
             logr = pm.Normal("logr", sd=1.0,
                              mu=0.5*np.log(np.array(depth_value))+np.log(R_star[0]), shape=shape)
@@ -343,11 +352,11 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
     # Burn in
     sampler = xo.PyMC3Sampler()
     with model:
-        burnin = sampler.tune(tune=150, start=map_soln,
+        burnin = sampler.tune(tune=np.max([ndraws*0.3, 150]), start=map_soln,
                               step_kwargs=dict(target_accept=0.9),
                               chains=4)
     # Sample
     with model:
-        trace = sampler.sample(draws=400, chains=4)
+        trace = sampler.sample(draws=ndraws, chains=4)
 
     return trace, mask

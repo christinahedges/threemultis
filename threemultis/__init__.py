@@ -6,4 +6,5 @@ import os
 PACKAGEDIR = os.path.abspath(os.path.dirname(__file__))
 
 from . import fit
+from . import jointfit
 from . import utils

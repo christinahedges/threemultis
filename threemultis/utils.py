@@ -3,8 +3,11 @@ from . import PACKAGEDIR
 import numpy as np
 import lightkurve as lk
 import matplotlib.pyplot as plt
+import exoplanet as xo
+
 
 plt.style.use(lk.MPLSTYLE)
+
 
 def get_params(name):
     df = pd.read_csv('{}/data/{}.csv'.format(PACKAGEDIR, name))
@@ -21,7 +24,7 @@ def planet_mask(time, name):
         mask &= (np.abs(x_fold) > d/2)
     return mask
 
-def planet_plot(clc, name):
+def planet_plot(clc, name, nbin=1):
     params = get_params(name)
     fig, axs = plt.subplots(len(params), 1, figsize=(8, 3 * len(params)), sharex=True)
     for planet, df in params.iterrows():
@@ -38,10 +41,12 @@ def planet_plot(clc, name):
         t0 = df['T0']
         d = df['Duration']
         x_fold = (clc.time - t0 + 0.5*p) % p - 0.5*p
-        clc[mask].fold(p, t0).errorbar(ax=axs[planet], label='Planet {} (Period: {:2.4f}d)'.format(planet + 1, p))
+        f = clc[mask].fold(p, t0).bin(nbin)
+        f.errorbar(ax=axs[planet], label='Planet {} (Period: {:2.4f}d)'.format(planet + 1, p))
+
         if planet < len(params) - 1:
             axs[planet].set_xlabel('')
-        axs[planet].set_xlim(-0.2, 0.2)
+        axs[planet].set_xlim(-0.1, 0.1)
         if planet == 0:
             axs[planet].set_title(name)
     return fig
