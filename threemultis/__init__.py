@@ -4,3 +4,6 @@ from __future__ import absolute_import
 
 import os
 PACKAGEDIR = os.path.abspath(os.path.dirname(__file__))
+
+from . import fit
+from . import utils

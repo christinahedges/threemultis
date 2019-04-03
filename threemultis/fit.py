@@ -18,6 +18,8 @@ from astropy.convolution import convolve, Box1DKernel
 import astropy.units as u
 import pandas as pd
 
+log = logging.getLogger()
+log.setLevel('WARNING')
 plt.style.use(lk.MPLSTYLE)
 
 @contextmanager
@@ -70,7 +72,7 @@ def _plot_light_curve(map_soln, model, mask, x, y, yerr, components, gp):
     return fig
 
 
-def joint_fit(tpf, period_value, t0_value, depth_value, duration_value, R_star, M_star, T_star, aperture=None, texp=0.0204335):
+def joint_fit(tpf, period_value, t0_value, depth_value, duration_value, R_star, M_star, T_star, aperture=None, texp=0.0204335, return_quick_corrected=False, return_soln=False):
     shape = len(period_value)
 
     planet_mask = np.ones(len(tpf.time), bool)
@@ -232,15 +234,9 @@ def joint_fit(tpf, period_value, t0_value, depth_value, duration_value, R_star, 
 
             return model, map_soln, gp
 
-#    print(np.isfinite(time).all(), np.isfinite(raw_flux).all(), np.isfinite(raw_flux_err).all())
-#    print(np.isfinite(X_pld).all())
-#    print(planet_mask.sum())
-#    print(np.log(np.std(raw_flux[planet_mask])))
-#    print(np.isfinite(X_pld[planet_mask].T).all())
-    model0, map_soln0, gp = build_model()
+    with silence():
+        model0, map_soln0, gp = build_model()
 
-#    lc_fig = _plot_light_curve(map_soln0, model0, planet_mask, time, raw_flux, raw_flux_err, X_pld, gp)
-#    return model0, map_soln0, gp, X_pld, time, raw_flux, raw_flux_err
 
     # Remove outliers
     with model0:
@@ -251,9 +247,28 @@ def joint_fit(tpf, period_value, t0_value, depth_value, duration_value, R_star, 
         mask = ~(convolve(mask, Box1DKernel(5), fill_value=1) != 1)
         mask |= (~planet_mask)
 
-    model, map_soln, gp = build_model(start=map_soln0, mask=mask)
+    with silence():
+        model, map_soln, gp = build_model(start=map_soln0, mask=mask)
 
     lc_fig = _plot_light_curve(map_soln, model, mask, time, raw_flux, raw_flux_err, X_pld, gp)
+
+    if return_soln:
+        motion = np.dot(X_pld, map_soln['weights']).reshape(-1)
+        with model:
+            stellar = xo.eval_in_model(gp.predict(time), map_soln)
+        return model, map_soln, motion, stellar
+
+    if return_quick_corrected:
+        raw_lc = tpf.to_lightcurve()
+        clc = lk.KeplerLightCurve(time=time,
+                                  flux=(raw_flux - stellar - motion) * 1e-3 + 1,
+                                  flux_err=(raw_flux_err) * 1e-3,
+                                  time_format=raw_lc.time_format,
+                                  centroid_col=tpf.estimate_centroids()[0],
+                                  centroid_row=tpf.estimate_centroids()[0], quality=raw_lc.quality, channel=raw_lc.channel,
+                                  campaign=raw_lc.campaign, quarter=raw_lc.quarter, mission=raw_lc.mission, cadenceno=raw_lc.cadenceno, targetid=raw_lc.targetid,
+                                  ra=raw_lc.ra, dec=raw_lc.dec, label='{} PLD Corrected'.format(raw_lc.targetid))
+        return clc
 
     return model, map_soln, gp, X_pld, time, raw_flux, raw_flux_err, mask
 
@@ -261,7 +276,7 @@ def joint_fit(tpf, period_value, t0_value, depth_value, duration_value, R_star, 
 
 
 
-def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5):
+def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5, trim=0):
     ''' Use exoplanet, pymc3 and theano to perform PLD correction
 
     Parameters
@@ -278,10 +293,15 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
         aperture = tpf.pipeline_mask
 
     time = np.asarray(tpf.time, np.float64)
-    flux = np.nan_to_num(np.asarray(tpf.flux, np.float64))
-    flux_err = np.nan_to_num(np.asarray(tpf.flux_err, np.float64))
+    if trim > 0:
+        flux = np.nan_to_num(np.asarray(tpf.flux[:, trim:-trim, trim:-trim], np.float64))
+        flux_err = np.nan_to_num(np.asarray(tpf.flux_err[:, trim:-trim, trim:-trim], np.float64))
+        aper = np.asarray(aperture, bool)[trim:-trim, trim:-trim]
+    else:
+        flux = np.nan_to_num(np.asarray(tpf.flux, np.float64))
+        flux_err = np.nan_to_num(np.asarray(tpf.flux_err, np.float64))
+        aper = np.asarray(aperture, bool)
 
-    aper = np.asarray(aperture, bool)
     raw_flux = np.asarray(np.nansum(flux[:, aper], axis=(1)),  np.float64)
     raw_flux_err = np.asarray(np.nansum(flux_err[:, aper]**2, axis=(1))**0.5,  np.float64)
 
@@ -319,6 +339,7 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
 
     ## Construct the design matrix and fit for the PLD model
     X_pld = np.concatenate((X_pld, X2_pld), axis=-1)
+
 
     def build_model(mask=None, start=None):
         ''' Build a PYMC3 model
@@ -377,10 +398,11 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
             return model, map_soln, gp
 
     # First rough correction
-#    with silence():
-    model0, map_soln0, gp = build_model(mask=planet_mask)
+    log.info('Optimizing roughly')
+    with silence():
+        model0, map_soln0, gp = build_model(mask=planet_mask)
 
-    # Remove outliers
+    # Remove outliers, make sure to remove a few nearby points incase of flares.
     with model0:
         motion = np.dot(X_pld, map_soln0['weights']).reshape(-1)
         stellar = xo.eval_in_model(gp.predict(time), map_soln0)
@@ -390,8 +412,9 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
         mask &= planet_mask
 
     # Optimize PLD
-#    with silence():
-    model, map_soln, gp = build_model(mask, map_soln0)
+    log.info('Optimizing without outliers')
+    with silence():
+        model, map_soln, gp = build_model(mask, map_soln0)
     lc_fig = _plot_light_curve(map_soln, model, mask, time, raw_flux, raw_flux_err, X_pld, gp)
 
     if return_soln:
@@ -565,7 +588,7 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
     return trace, mask
 
 
-def plot_folded_transits(lc, trace, mask):
+def plot_folded_transits(lc, trace, mask, name):
     lc = lc.copy()
     x, y, yerr = np.asarray(lc.time, float), np.asarray(lc.flux, float), np.asarray(lc.flux_err, float)
 
@@ -617,7 +640,7 @@ def plot_folded_transits(lc, trace, mask):
         ax.set_xlim(-0.5*p, 0.5*p)
         ax.set_xlabel("Time from Transit Midpoint [days]")
         ax.set_ylabel("Relative Flux [ppt]")
-        ax.set_title("Planet {0}".format(letter));
+        ax.set_title("{0} {1}".format(name, letter));
         ax.set_xlim(-0.3, 0.3)
     return fig
 
@@ -629,7 +652,7 @@ def latex_trace(trace, name):
 
     letters = 'bcdefghejklmnop'
     results = pd.DataFrame(columns=['\\emph{{{} {}}}'.format(name, letters[idx]) for idx in range(nplanets)])
-    labels = ['Period [days]', 'Transit Midpoint [JD]', 'Radius [$R_{earth}$]', 'Impact Parameter', 'Inclination [degrees]', 'Semi Major Axis [a/R$^*]$', "Effective Temperature [K]"]
+    labels = ['Period [days]', 'Transit Midpoint [JD]', 'Radius [$R_{earth}$]', 'Impact Parameter', 'Inclination [degrees]', 'Semi Major Axis [a/R$^*]$', "Equillibrium Temperature [K]"]
     keys = ['period', 't0', 'r_pl', 'b', 'incl', 'a', 'teff']
     for label, key in zip(labels, keys):
         for idx in range(nplanets):
@@ -647,8 +670,8 @@ def latex_trace(trace, name):
             results.loc[label, results.columns[idx]] = str.format(*ans)
 
     star_results = pd.DataFrame(columns=['Host Star'])
-    labels = ['Mass', 'Radius']
-    keys = ['m_star', 'r_star']
+    labels = ['Mass [Msol]', 'Radius [Rsol]', 'Effective Temperature [K]']
+    keys = ['m_star', 'r_star', 't_star']
     for label, key in zip(labels, keys):
         ans = np.percentile(trace[key], [16, 50, 84], axis=0)
 
