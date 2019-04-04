@@ -352,7 +352,7 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
     # Burn in
     sampler = xo.PyMC3Sampler()
     with model:
-        burnin = sampler.tune(tune=np.max([ndraws*0.3, 150]), start=map_soln,
+        burnin = sampler.tune(tune=np.max([int(ndraws*0.3), 150]), start=map_soln,
                               step_kwargs=dict(target_accept=0.9),
                               chains=4)
     # Sample

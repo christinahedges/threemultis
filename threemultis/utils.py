@@ -4,6 +4,7 @@ import numpy as np
 import lightkurve as lk
 import matplotlib.pyplot as plt
 import exoplanet as xo
+import astropy.units as u
 
 
 plt.style.use(lk.MPLSTYLE)
@@ -54,6 +55,7 @@ def planet_plot(clc, name, nbin=1):
 
 
 def plot_folded_transits(lc, trace, mask, name):
+    params = get_params(name)
     lc = lc.copy()
     x, y, yerr = np.asarray(lc.time, float), np.asarray(lc.flux, float), np.asarray(lc.flux_err, float)
 
@@ -65,9 +67,10 @@ def plot_folded_transits(lc, trace, mask, name):
     yerr *= 1e3
 
     nplanets = trace['light_curves'].shape[-1]
-    fig, axs = plt.subplots(1, nplanets, figsize=(7 * nplanets, 5))
+    fig, axs = plt.subplots(nplanets, 1, figsize=(7, 4.5 * nplanets))
 
-    for idx, letter in enumerate("bc"):
+    letters = np.asarray(['b','c', 'd', 'e'])
+    for idx, letter in enumerate(letters[:nplanets]):
 
         ax = axs[idx]
         # Get the posterior median orbital parameters
@@ -77,10 +80,13 @@ def plot_folded_transits(lc, trace, mask, name):
         # Compute the median of posterior estimate of the contribution from
         # the other planet. Then we can remove this from the data to plot
         # just the planet we care about.
-        other = np.median(trace["light_curves"][:, :, (idx + 1) % 2], axis=0)
+        otherplanets = list(set(list(np.arange(len(params)))) - set([idx]))
+        other = np.zeros(mask.sum())
+        for o in otherplanets:
+            other += np.median(trace["light_curves"][:, :, o], axis=0)
 
         # Plot the folded data
-        x_fold = (x[mask] - t0 + 0.5*p) % p - 0.5*p
+        x_fold = ((x[mask] - t0 + 0.5*p) % p - 0.5*p)/p
         ax.errorbar(x_fold, y[mask] - other, yerr=yerr[mask], color="k", ls='', label="Data",
                      zorder=-1000, lw=0.2)
 
@@ -101,12 +107,13 @@ def plot_folded_transits(lc, trace, mask, name):
                      xytext=(5, 5), textcoords="offset points",
                      ha="left", va="bottom", fontsize=12)
 
-        ax.legend(fontsize=10, loc=4)
+        ax.legend(fontsize=10, loc='lower right')
         ax.set_xlim(-0.5*p, 0.5*p)
-        ax.set_xlabel("Time from Transit Midpoint [days]")
+        if idx == nplanets - 1:
+            ax.set_xlabel("Phase")
         ax.set_ylabel("Relative Flux [ppt]")
         ax.set_title("{0} {1}".format(name, letter));
-        ax.set_xlim(-0.3, 0.3)
+        ax.set_xlim(-0.05, 0.05)
     return fig
 
 def latex_trace(trace, name):
