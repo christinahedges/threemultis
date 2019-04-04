@@ -41,7 +41,7 @@ def silence():
 
 
 
-def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5, trim=0, ndraws=1000):
+def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5, trim=0, ndraws=1000, logrho_mu=np.log(150)):
     ''' Use exoplanet, pymc3 and theano to perform PLD correction
 
     Parameters
@@ -139,7 +139,7 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
 #            pm.Potential("logs2_prior1", tt.switch(logs2 < -3, -np.inf, 0.0))
 
             logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=4)
-            logrho = pm.Normal("logrho", mu=np.log(150), sd=4)
+            logrho = pm.Normal("logrho", mu=logrho_mu, sd=4)
             kernel = xo.gp.terms.Matern32Term(log_rho=logrho, log_sigma=logsigma)
             gp = xo.gp.GP(kernel, time[mask], tt.exp(logs2) + raw_flux_err[mask]**2)
 
