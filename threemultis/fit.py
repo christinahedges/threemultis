@@ -102,8 +102,11 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     U, _, _ = np.linalg.svd(X2_pld, full_matrices=False)
     X2_pld = U[:, :X_pld.shape[1]]
 
-    ## Construct the design matrix and fit for the PLD model
+    # Construct the design matrix and fit for the PLD model
     X_pld = np.concatenate((np.ones((len(flux), 1)), X_pld, X2_pld), axis=-1)
+
+    # Create a matrix with small numbers along diagonal to ensure that
+    # X.T * sigma^-1 * X is not singular, and prevent it from being non-invertable
     diag = np.diag((1e-8*np.ones(X_pld.shape[1])))
 
     if (~np.isfinite(X_pld)).any():
@@ -147,7 +150,7 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
             # Motion model
             #------------------
             A = tt.dot(X_pld[mask].T, gp.apply_inverse(X_pld[mask]))
-            A = A + diag
+            A = A + diag # Add small numbers to diagonal to prevent it from being singular
             B = tt.dot(X_pld[mask].T, gp.apply_inverse(raw_flux[mask, None]))
             C = tt.slinalg.solve(A, B)
             motion_model = pm.Deterministic("motion_model", tt.dot(X_pld[mask], C)[:, 0])
