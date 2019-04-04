@@ -103,7 +103,8 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     X2_pld = U[:, :X_pld.shape[1]]
 
     ## Construct the design matrix and fit for the PLD model
-    X_pld = np.concatenate((X_pld, X2_pld), axis=-1)
+    X_pld = np.concatenate((np.ones((len(flux), 1)), X_pld, X2_pld), axis=-1)
+    diag = np.diag((1e-8*np.ones(X_pld.shape[1])))
 
     if (~np.isfinite(X_pld)).any():
         raise ValueError('NaNs in components.')
@@ -139,13 +140,14 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
             pm.Potential("logs2_prior1", tt.switch(logs2 < -2, -np.inf, 0.0))
 
             logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=10)
-            logrho = pm.Normal("logrho", mu=np.log(150), sd=10)
+            logrho = pm.Normal("logrho", mu=np.log(30), sd=10)
             kernel = xo.gp.terms.Matern32Term(log_rho=logrho, log_sigma=logsigma)
             gp = xo.gp.GP(kernel, time[mask], tt.exp(logs2) + raw_flux_err[mask]**2)
 
             # Motion model
             #------------------
             A = tt.dot(X_pld[mask].T, gp.apply_inverse(X_pld[mask]))
+            A = A + diag
             B = tt.dot(X_pld[mask].T, gp.apply_inverse(raw_flux[mask, None]))
             C = tt.slinalg.solve(A, B)
             motion_model = pm.Deterministic("motion_model", tt.dot(X_pld[mask], C)[:, 0])
