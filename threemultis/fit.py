@@ -41,7 +41,7 @@ def silence():
 
 
 
-def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5, trim=0):
+def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_corrected=False, sigma=5, trim=0, ndraws=1000):
     ''' Use exoplanet, pymc3 and theano to perform PLD correction
 
     Parameters
@@ -136,11 +136,11 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
         with pm.Model() as model:
             # GP
             # --------
-            logs2 = pm.Normal("logs2", mu=np.log(np.var(raw_flux[mask])), sd=2)
-            pm.Potential("logs2_prior1", tt.switch(logs2 < -2, -np.inf, 0.0))
+            logs2 = pm.Normal("logs2", mu=np.log(np.var(raw_flux[mask])), sd=4)
+#            pm.Potential("logs2_prior1", tt.switch(logs2 < -3, -np.inf, 0.0))
 
-            logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=10)
-            logrho = pm.Normal("logrho", mu=np.log(30), sd=10)
+            logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=4)
+            logrho = pm.Normal("logrho", mu=np.log(150), sd=4)
             kernel = xo.gp.terms.Matern32Term(log_rho=logrho, log_sigma=logsigma)
             gp = xo.gp.GP(kernel, time[mask], tt.exp(logs2) + raw_flux_err[mask]**2)
 
@@ -214,12 +214,12 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     # Burn in
     sampler = xo.PyMC3Sampler()
     with model:
-        burnin = sampler.tune(tune=400, start=map_soln,
+        burnin = sampler.tune(tune=np.max([int(ndraws*0.3), 150]), start=map_soln,
                               step_kwargs=dict(target_accept=0.9),
                               chains=4)
     # Sample
     with model:
-        trace = sampler.sample(draws=1000, chains=4)
+        trace = sampler.sample(draws=ndraws, chains=4)
 
     varnames = ["logrho", "logsigma", "logs2"]
     pm.traceplot(trace, varnames=varnames);
