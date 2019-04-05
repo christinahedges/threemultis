@@ -27,7 +27,7 @@ def planet_mask(time, name):
 
 def planet_plot(clc, name, nbin=1):
     params = get_params(name)
-    fig, axs = plt.subplots(len(params), 1, figsize=(8, 3 * len(params)), sharex=True)
+    fig, axs = plt.subplots(len(params), 1, figsize=(8, 3 * len(params)), sharex=True, sharey=True)
     for planet, df in params.iterrows():
         otherplanets = list(set(list(np.arange(len(params)))) - set([planet]))
         mask = np.ones(len(clc.time), bool)
@@ -47,7 +47,7 @@ def planet_plot(clc, name, nbin=1):
 
         if planet < len(params) - 1:
             axs[planet].set_xlabel('')
-        axs[planet].set_xlim(-0.1, 0.1)
+        axs[planet].set_xlim(-0.05, 0.05)
         if planet == 0:
             axs[planet].set_title(name)
     return fig

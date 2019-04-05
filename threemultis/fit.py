@@ -75,8 +75,8 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     raw_flux -= 1
 
     # Setting to Parts Per Thousand keeps us from hitting machine precision errors...
-    raw_flux *= 1e3
-    raw_flux_err *= 1e3
+    raw_flux *= 1e6
+    raw_flux_err *= 1e6
 
     # Build the first order PLD basis
 #    X_pld = np.reshape(flux[:, aper], (len(flux), -1))
@@ -103,11 +103,12 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     X2_pld = U[:, :X_pld.shape[1]]
 
     # Construct the design matrix and fit for the PLD model
-    X_pld = np.concatenate((np.ones((len(flux), 1)), X_pld, X2_pld), axis=-1)
+#    X_pld = np.concatenate((np.ones((len(flux), 1)), X_pld, X2_pld), axis=-1)
+    X_pld = np.concatenate((X_pld, X2_pld), axis=-1)
 
     # Create a matrix with small numbers along diagonal to ensure that
     # X.T * sigma^-1 * X is not singular, and prevent it from being non-invertable
-    diag = np.diag((1e-8*np.ones(X_pld.shape[1])))
+#    diag = np.diag((1e-8*np.ones(X_pld.shape[1])))
 
     if (~np.isfinite(X_pld)).any():
         raise ValueError('NaNs in components.')
@@ -145,12 +146,13 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
             logsigma = pm.Normal("logsigma", mu=np.log(np.std(raw_flux[mask])), sd=4)
             logrho = pm.Normal("logrho", mu=logrho_mu, sd=4)
             kernel = xo.gp.terms.Matern32Term(log_rho=logrho, log_sigma=logsigma)
+
             gp = xo.gp.GP(kernel, time[mask], tt.exp(logs2) + raw_flux_err[mask]**2)
 
             # Motion model
             #------------------
             A = tt.dot(X_pld[mask].T, gp.apply_inverse(X_pld[mask]))
-            A = A + diag # Add small numbers to diagonal to prevent it from being singular
+#            A = A + diag # Add small numbers to diagonal to prevent it from being singular
             B = tt.dot(X_pld[mask].T, gp.apply_inverse(raw_flux[mask, None]))
             C = tt.slinalg.solve(A, B)
             motion_model = pm.Deterministic("motion_model", tt.dot(X_pld[mask], C)[:, 0])
@@ -260,7 +262,7 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     return clc
 
 
-def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star, texp=0.0204335, ndraws=1000):
+def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star, texp=0.0204335, ndraws=1000, return_mapsoln=False):
     '''Fit planet parameters using exoplanet'''
 
     lc = lc.copy()
@@ -353,6 +355,9 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
 
     with silence():
         model, map_soln = build_model(mask=mask, start=map_soln0)
+
+    if return_mapsoln:
+        return model, map_soln, mask
 
     # Burn in
     sampler = xo.PyMC3Sampler()
