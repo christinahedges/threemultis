@@ -207,8 +207,8 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     if return_quick_corrected:
         raw_lc = tpf.to_lightcurve()
         clc = lk.KeplerLightCurve(time=time,
-                                  flux=(raw_flux - stellar - motion) * 1e-3 + 1,
-                                  flux_err=(raw_flux_err) * 1e-3,
+                                  flux=(raw_flux - stellar - motion) * 1e-6 + 1,
+                                  flux_err=(raw_flux_err) * 1e-6,
                                   time_format=raw_lc.time_format,
                                   centroid_col=tpf.estimate_centroids()[0],
                                   centroid_row=tpf.estimate_centroids()[0], quality=raw_lc.quality, channel=raw_lc.channel,
@@ -252,8 +252,8 @@ def PLD(tpf, planet_mask=None, aperture=None, return_soln=False, return_quick_co
     meta = {'samples':samples, 'trace':trace, 'pred_mu':pred_mu, 'pred_motion':pred_motion}
 
     clc = lk.KeplerLightCurve(time=time,
-                              flux=(raw_flux - star_model) * 1e-3 + 1,
-                              flux_err=((raw_flux_err**2 + star_model_err**2)**0.5) * 1e-3,
+                              flux=(raw_flux - star_model) * 1e-6 + 1,
+                              flux_err=((raw_flux_err**2 + star_model_err**2)**0.5) * 1e-6,
                               time_format=raw_lc.time_format,
                               centroid_col=tpf.estimate_centroids()[0],
                               centroid_row=tpf.estimate_centroids()[0], quality=raw_lc.quality, channel=raw_lc.channel,
@@ -277,8 +277,8 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
     y /= np.median(y)
     y -= 1
 
-    y *= 1e3
-    yerr *= 1e3
+    y *= 1e6
+    yerr *= 1e6
 
 
     def build_model(mask=None, start=None):
@@ -289,6 +289,8 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
             # Parameters for the stellar properties
             mean = pm.Normal("mean", mu=0.0, sd=10.0)
             u_star = xo.distributions.QuadLimbDark("u_star")
+            pm.Potential("u_star_prior", tt.switch(u_star < 0, -np.inf, 0.0))
+
 
             m_star = pm.Normal("m_star", mu=M_star[0], sd=M_star[1])
             r_star = pm.Normal("r_star", mu=R_star[0], sd=R_star[1])
@@ -324,7 +326,7 @@ def fit_planets(lc, period_value, t0_value, depth_value, R_star, M_star, T_star,
 
             # Compute the model light curve using starry
             light_curves = xo.StarryLightCurve(u_star).get_light_curve(
-                orbit=orbit, r=r_pl, t=x[mask], texp=texp)*1e3
+                orbit=orbit, r=r_pl, t=x[mask], texp=texp)*1e6
             light_curve = pm.math.sum(light_curves, axis=-1) + mean
             pm.Deterministic("light_curves", light_curves)
 

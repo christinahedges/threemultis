@@ -63,8 +63,8 @@ def plot_folded_transits(lc, trace, mask, name):
     y /= np.median(y)
     y -= 1
 
-    y *= 1e3
-    yerr *= 1e3
+    y *= 1e6
+    yerr *= 1e6
 
     nplanets = trace['light_curves'].shape[-1]
     fig, axs = plt.subplots(nplanets, 1, figsize=(7, 4.5 * nplanets))
@@ -111,7 +111,7 @@ def plot_folded_transits(lc, trace, mask, name):
         ax.set_xlim(-0.5*p, 0.5*p)
         if idx == nplanets - 1:
             ax.set_xlabel("Phase")
-        ax.set_ylabel("Relative Flux [ppt]")
+        ax.set_ylabel("Relative Flux [ppm]")
         ax.set_title("{0} {1}".format(name, letter));
         ax.set_xlim(-0.05, 0.05)
     return fig
